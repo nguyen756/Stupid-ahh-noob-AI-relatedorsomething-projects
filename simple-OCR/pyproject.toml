@@ -1,10 +1,14 @@
 [project]
 name = "simple-ocr"
 version = "0.1.0"
-description = "Add your description here"
+description = "A simple OCR app"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "streamlit",
+    "pillow",
+    "pytesseract"
+]
 
 [tool.poetry]
 package-mode = false
