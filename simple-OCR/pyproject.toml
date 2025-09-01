@@ -7,7 +7,8 @@ requires-python = ">=3.12"
 dependencies = [
     "streamlit",
     "pillow",
-    "pytesseract"
+    "pytesseract",
+    "easyocr (>=1.7.2,<2.0.0)"
 ]
 
 [tool.poetry]
