@@ -4,3 +4,4 @@ pymupdf
 pillow
 numpy
 opencv-python-headless
+st_img_pastebutton
