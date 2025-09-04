@@ -8,3 +8,5 @@ fitz
 st_img_pastebutton
 openai
 dotenv
+python-dotenv
+
