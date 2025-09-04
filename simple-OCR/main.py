@@ -6,6 +6,18 @@ import io
 import numpy as np
 from st_img_pastebutton import paste
 import base64
+import os
+import streamlit as st
+import io
+from openai import OpenAI
+from dotenv import load_dotenv
+
+
+
+
+load_dotenv()
+gemini_api_key = os.getenv("GEMINI_API_KEY")
+
 
 st.set_page_config(page_title="OCR with EasyOCR", layout="wide")
 st.title("📄 OCR with EasyOCR")
@@ -92,7 +104,6 @@ if method == "Upload file":
                     mime="text/plain"
                 )
 
-# ===== PASTE IMAGE =====
 elif method == "Paste image":
     image_data = paste(label="📋 Click here, then paste your image (Ctrl+V)", key="pastebox")
 
@@ -114,5 +125,25 @@ elif method == "Paste image":
                 file_name="pasted_image_ocr.txt",
                 mime="text/plain"
             )
+            prompt=f""" if any text in this image is a question, answer it, if not, just say "no question found"
+            image content:
+            {extracted_text}
+            """
+
+            client = OpenAI(
+            api_key=gemini_api_key,
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+            )
+            response = client.chat.completions.create(
+            model="gemini-1.5-flash",
+            messages=[
+                {"role": "system","content": "pretend you are rick sanchez"},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=500,
+            )
+            st.markdown("### Analysis Result:")
+            st.markdown(response.choices[0].message.content)
+
     else:
         st.info("Click the box above, copy an image, and press Ctrl+V.")
