@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 
 
 load_dotenv()
-gemini_api_key = os.getenv("GEMINI_API_KEY")
+gemini_api_key = os.getenv("GEMINI_API_KEY") or st.secrets["GROQ_API_KEY"]
 
 
 st.set_page_config(page_title="OCR with EasyOCR", layout="wide")
