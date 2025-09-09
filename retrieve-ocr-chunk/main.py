@@ -1,14 +1,6 @@
-# prepare_data_cpu.py
-"""
-CPU-optimized preparation pipeline for large image-only PDFs.
+#MAX_ANIMALS = params.get("MAX_ANIMALS", 50) adjust the number for max row wiki retrieve
 
-Features:
-- Uses Tesseract (pytesseract) when available (faster & much lighter on RAM than EasyOCR on CPU).
-- Falls back to EasyOCR if pytesseract or binary not found.
-- Lower default DPI, downscaling, and batched OCR submission to avoid memory thrash.
-- Incremental manifest logic retained.
-- Parallel OCR with ProcessPoolExecutor (small number of workers by default).
-"""
+
 
 import os
 import io
@@ -23,7 +15,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 from tqdm import tqdm
 
-# pip install pytesseract easyocr sentence-transformers faiss-cpu pymupdf nltk wikipedia pillow
+# pip install pytesseract easyocr sentence-transformers faiss-cpu pymupdf nltk wikipedia pillow, if pymupdf doesnt works change to fitz.
 import pymupdf
 from PIL import Image
 import nltk
@@ -48,19 +40,18 @@ try:
 except Exception:
     EASYOCR_AVAILABLE = False
 
-# optional to detect torch GPU for sentence-transformers (we assume CPU-only here)
 try:
     import torch
 except Exception:
     torch = None
 
-nltk.download("punkt", quiet=True)
+nltk.download("punkt")
 
 # -----------------------
-# Config (CPU-friendly defaults)
+# defaut for cpu run, change if run with gpu
 # -----------------------
 EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
-EMBED_BATCH_SIZE = 64           # keep modest for CPU
+EMBED_BATCH_SIZE = 64          
 CHUNK_MAX_CHARS = 800
 CHUNK_OVERLAP = 200
 EMBED_DTYPE = "float32"
@@ -72,20 +63,25 @@ EMBEDDINGS_NPY = "embeddings.npy"
 PAGES_JSONL = "pages.jsonl"
 MANIFEST_JSON = "manifest.json"
 
-# CPU-friendly OCR tuning
-USE_TESSERACT_AUTO = True       # auto-detect; if false, force EasyOCR (only if available)
-TESSERACT_LANGS = "vie"     # change if you only need 'eng' to speed up
+#OCR stuff
+USE_TESSERACT_AUTO = True       # if false, force EasyOCR 
+TESSERACT_LANGS = "vie"     # vie=vietnamese, eng=english, ski=skibidi,etc...
 OCR_WORKERS = max(1, min(4, (os.cpu_count() or 2) - 1))  # conservative default
 OCR_DPI = 100                   # lower DPI speeds rendering and OCR
 DOWNSCALE_MAX_WIDTH = 1200      # downscale wide pages to this width before OCR (px)
 PAGE_RENDER_BATCH = 32          # render pages to PNG in batches before sending to OCR (memory control)
 
+
 # -----------------------
-# Utilities
+# Utilities, used to uniquely identify text chunks for deduplication.
 # -----------------------
 def sha1(text: str, n_bytes=12):
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:n_bytes]
 
+
+# -----------------------
+# Returns the full hex digest of the file’s contents, basically detect if the pdf changes.
+# -----------------------
 def file_sha1(path, chunk_size=8 * 1024 * 1024):
     h = hashlib.sha1()
     with open(path, "rb") as f:
@@ -96,14 +92,27 @@ def file_sha1(path, chunk_size=8 * 1024 * 1024):
             h.update(chunk)
     return h.hexdigest()
 
+
+# -----------------------
+# Clean OCR text 
+# -----------------------
 def clean_ocr_text(text: str) -> str:
     text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)  # join hyphenated words
     text = re.sub(r"(?<!\n)\n(?!\n)", " ", text)  # single newlines -> space
     text = re.sub(r"\s+", " ", text).strip()
     return text
+
+
+# -----------------------
+# Returns the URL of specific wiki. For example the title "aaa" becomes "https://vi.wikipedia.org/wiki/aaa"
+# -----------------------
 def page_url_from_title(title, lang="vi"):
     return f"https://{lang}.wikipedia.org/wiki/{quote(title.replace(' ', '_'))}"
 
+
+# -----------------------
+# Fetches an HTML page, extract Wikipedia page titles from the first column, then look if it contain link to a wiki page.
+# -----------------------
 def extract_first_column_titles_from_url(main_url, max_titles=None):
     """
     Parse ALL wikitables on the page, and return Wikipedia TITLES
@@ -113,7 +122,6 @@ def extract_first_column_titles_from_url(main_url, max_titles=None):
     r = requests.get(main_url, headers=headers, timeout=30)
     r.raise_for_status()
     soup = BeautifulSoup(r.content, "html.parser")
-
     titles = []
     tables = soup.select("table.wikitable")
     if not tables:
@@ -135,7 +143,7 @@ def extract_first_column_titles_from_url(main_url, max_titles=None):
             if "redlink=1" in href or ("new" in (a.get("class") or [])):
                 continue
 
-            # /wiki/Vo%E1%BB%8Dc_ch%C3%A0_v%C3%A0ng → "Voọc chà vàng"
+            # For example /wiki/Vo%E1%BB%8Dc_ch%C3%A0_v%C3%A0ng is Voọc chà vàng stuff
             path = urlparse(href).path
             title = unquote(path.split("/wiki/", 1)[-1]).replace("_", " ")
             if title:
@@ -154,8 +162,10 @@ def extract_first_column_titles_from_url(main_url, max_titles=None):
             seen.add(t)
             uniq.append(t)
     return uniq
+
+
 # -----------------------
-# Wikipedia ingestion
+# Wikipedia ingestion, return value is a list of page dictionaries from wikipedia contents (only one level linked page)
 # -----------------------
 def fetch_wikipedia_titles(
     titles,
@@ -247,6 +257,8 @@ def fetch_wikipedia_titles(
             include_links = False
 
     return pages
+
+
 # -----------------------
 # PDF rendering helper (render page -> PNG bytes)
 # -----------------------
@@ -255,8 +267,9 @@ def render_page_to_png_bytes(page: pymupdf.Page, dpi=OCR_DPI) -> bytes:
     pix = page.get_pixmap(matrix=mat, alpha=False)
     return pix.tobytes("png")
 
+
 # -----------------------
-# OCR worker (module-level for ProcessPoolExecutor)
+# OCR on a single page image(run inside a worker process)
 # This worker will prefer pytesseract if requested and available; otherwise uses EasyOCR.
 # -----------------------
 _worker_easy_reader = None  # easyocr.Reader instance per worker (when fallback)
@@ -315,9 +328,9 @@ def _ocr_worker_png_bytes(png_bytes: bytes, use_tesseract: bool, tesseract_langs
     return "[ocr_error] no ocr backend available in worker"
 
 # -----------------------
-# PDF -> pages (collect pages with text and queue image pages)
+# Prepares pdf contents for processing by splitting into two sets(image/direct text)
 # -----------------------
-def pdf_to_pages_with_jobs(pdf_path: str, dpi=OCR_DPI) -> Tuple[List[dict], List[Tuple[str,int,bytes]]]:
+def pdf_to_pages_with_jobs(pdf_path: str, dpi=OCR_DPI) -> tuple[list[dict], list[tuple[str,int,bytes]]]:
     doc = pymupdf.open(pdf_path)
     pages_with_text = []
     ocr_jobs = []
@@ -331,7 +344,7 @@ def pdf_to_pages_with_jobs(pdf_path: str, dpi=OCR_DPI) -> Tuple[List[dict], List
     return pages_with_text, ocr_jobs
 
 # -----------------------
-# Chunking & dedupe
+# Chunking & dedupe (Late-chunking)
 # -----------------------
 def chunk_pages(pages, max_chars=CHUNK_MAX_CHARS, overlap_chars=CHUNK_OVERLAP):
     chunks = []
@@ -375,6 +388,10 @@ def chunk_pages(pages, max_chars=CHUNK_MAX_CHARS, overlap_chars=CHUNK_OVERLAP):
             chunk_id += 1
     return chunks
 
+
+# -----------------------
+# Eliminates duplicate chunks based on their hash
+# -----------------------
 def dedupe_chunks(chunks, existing_hashes=None):
     seen = set(existing_hashes) if existing_hashes else set()
     unique = []
@@ -388,7 +405,7 @@ def dedupe_chunks(chunks, existing_hashes=None):
     return unique, added
 
 # -----------------------
-# Embedding (CPU-only)
+# Embedding (CPU)
 # -----------------------
 def embed_chunks(chunks, model_name=EMBED_MODEL_NAME, batch_size=EMBED_BATCH_SIZE):
     if len(chunks) == 0:
@@ -396,7 +413,7 @@ def embed_chunks(chunks, model_name=EMBED_MODEL_NAME, batch_size=EMBED_BATCH_SIZ
     device = "cpu"
     print(f"[embed] Using device: {device}")
     model = SentenceTransformer(model_name, device=device)
-    texts = [c["text"] for c in chunks]
+    texts = [normalize_vi_text(c["text"]) for c in chunks]
     embeddings = []
     for i in tqdm(range(0, len(texts), batch_size), desc="Embedding"):
         batch = texts[i:i+batch_size]
@@ -404,6 +421,7 @@ def embed_chunks(chunks, model_name=EMBED_MODEL_NAME, batch_size=EMBED_BATCH_SIZ
         embeddings.append(emb_batch)
     embeddings = np.vstack(embeddings).astype(EMBED_DTYPE)
     return embeddings
+
 
 # -----------------------
 # FAISS helpers
@@ -418,14 +436,19 @@ def build_faiss(embeddings):
     index.add(embeddings)
     return index
 
+
 # -----------------------
-# Save / Load helpers
+# Writes a list of Python objects to json
 # -----------------------
 def save_jsonl(path, items):
     with open(path, "w", encoding="utf-8") as f:
         for c in items:
             f.write(json.dumps(c, ensure_ascii=False) + "\n")
 
+
+# -----------------------
+# Reads a JSON Lines file
+# -----------------------
 def load_jsonl(path):
     items = []
     with open(path, "r", encoding="utf-8") as f:
@@ -433,14 +456,26 @@ def load_jsonl(path):
             items.append(json.loads(line))
     return items
 
+
+# -----------------------
+# Saves a manifest (Python dict containing metadata) to a file in JSON
+# -----------------------
 def save_manifest(path, manifest):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
 
+
+# -----------------------
+# Writes a list of Python objects to json
+# -----------------------
 def load_manifest(path):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
-
+    
+    
+# -----------------------
+# Writes a list of Python objects to json
+# -----------------------
 def make_manifest(pdf_paths, wiki_titles, params):
     pdf_infos = []
     for p in sorted(pdf_paths):
@@ -462,6 +497,10 @@ def make_manifest(pdf_paths, wiki_titles, params):
     }
     return manifest
 
+
+# -----------------------
+# Writes a list of Python objects to json
+# -----------------------
 def manifests_differ(old, new):
     if old is None:
         return {"diff": True, "reason": "no previous manifest"}
@@ -478,10 +517,11 @@ def manifests_differ(old, new):
         return {"diff": True, "reason": "added_files_or_wiki", "added": list(added), "wiki_changed": wiki_changed}
     return {"diff": False, "reason": "no_change"}
 
+
 # -----------------------
-# Parallel OCR runner (batches submissions to avoid memory spike)
+# Parallel OCR incase pdf file too big(save memory)
 # -----------------------
-def _run_parallel_ocr(ocr_jobs: List[Tuple[str,int,bytes]], use_tesseract: bool, tesseract_langs: str, workers: int, downscale_max_width: int):
+def _run_parallel_ocr(ocr_jobs: list[tuple[str,int,bytes]], use_tesseract: bool, tesseract_langs: str, workers: int, downscale_max_width: int):
     """
     ocr_jobs: list of (pdf_basename, page_no, png_bytes)
     Returns pages list: {"page": page_no, "text": text, "source":"pdf_ocr", "title": title}
@@ -507,6 +547,7 @@ def _run_parallel_ocr(ocr_jobs: List[Tuple[str,int,bytes]], use_tesseract: bool,
 
     pages_out.sort(key=lambda x: (x.get("title", ""), x.get("page", 0)))
     return pages_out
+
 
 # -----------------------
 # Main orchestrator (keeps incremental logic)
@@ -649,6 +690,7 @@ def prepare_from_pdf_paths(pdf_paths, wiki_titles=None, wiki_lang="vi", out_dir=
     print("Full rebuild complete.")
     return chunks, embeddings, index
 
+
 # -----------------------
 # Loader helper for RAG
 # -----------------------
@@ -663,12 +705,24 @@ def load_prepared(out_dir="prepared_data_cpu"):
     index = faiss.read_index(faiss_path)
     return chunks, embeddings, index
 
+
 # -----------------------
-# Example usage
+# Clean the text again
 # -----------------------
+def normalize_vi_text(s: str) -> str:
+    import unicodedata, re, html
+    if not s:
+        return ""
+    s = html.unescape(s)
+    s = unicodedata.normalize("NFKC", s)
+    s = s.replace("\u00A0", " ").replace("\u200b", "")    #remove non-breaking & zero-width
+    s = re.sub(r"(\w)-\s+(\w)", r"\1\2", s) #collapse weird hyphenation & single newlines
+    s = re.sub(r"(?<!\n)\n(?!\n)", " ", s)
+    s = re.sub(r"\[\s*[0-9A-Za-z]+\s*\]", "", s)    #drop citation brackets like [1], [a]
+    s = re.sub(r"\s+", " ", s).strip()    #whitespace
+    return s
 if __name__ == "__main__":
-    # Replace with your PDF(s)
-    #pdf_list = [r"D:\\College\\_hk5\\Data\\2.pdf"]
+    #pdf_list = [r"D:\\College\\_hk5\\Data\\2.pdf"] hidden because no usable pdf yet
     pdf_list=[]
     wiki_titles = ["Danh mục sách đỏ động vật Việt Nam"]
 
@@ -683,4 +737,4 @@ if __name__ == "__main__":
     }
 
     chunks, embeddings, index = prepare_from_pdf_paths(pdf_list, wiki_titles=wiki_titles, wiki_lang="vi", out_dir="prepared_data_cpu", force=False, params=params)
-    print("Done. Chunks saved to prepared_data_cpu/")
+    print("Chunks saved to prepared_data_cpu/")
