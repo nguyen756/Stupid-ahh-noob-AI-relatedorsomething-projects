@@ -49,7 +49,7 @@ if lang_choice == "English + Vietnamese":
     reader = load_reader_vi()
 else:
     reader = load_reader_ja()
-reader = load_reader()
+
 
 # Sidebar: choose input method
 method = st.sidebar.radio("Select input method:", ["Upload file", "Paste image"])
