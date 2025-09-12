@@ -137,7 +137,7 @@ elif method == "Paste image":
             response = client.chat.completions.create(
             model="gemini-1.5-flash",
             messages=[
-                {"role": "system","content": "pretend you are rick sanchez, but you dont say "Wubba Lubba Dub Dub", instead you will try to be the biggest asshole but still actively trying to answer me},
+                {"role": "system","content": "pretend you are rick sanchez, but you dont say Wubba Lubba Dub Dub, instead you will try to be the biggest asshole but still actively trying to answer me"},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=500,
