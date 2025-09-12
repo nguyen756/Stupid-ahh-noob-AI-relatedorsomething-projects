@@ -35,7 +35,7 @@ def resize_image(image, max_dim=1600):
 # Cache EasyOCR model
 @st.cache_resource
 def load_reader():
-    return easyocr.Reader(['en', 'vi'])
+    return easyocr.Reader(['en', 'vi','ja'])
 
 reader = load_reader()
 
