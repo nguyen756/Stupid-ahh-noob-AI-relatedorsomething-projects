@@ -125,7 +125,7 @@ elif method == "Paste image":
                 file_name="pasted_image_ocr.txt",
                 mime="text/plain"
             )
-            prompt=f""" if any text in this image is a question, answer it, if not, just say "no question found"
+            prompt=f""" if any text in this image is a question, answer it, if not, just say "no question found", if there are information, try to elbaorate
             image content:
             {extracted_text}
             """
@@ -137,7 +137,7 @@ elif method == "Paste image":
             response = client.chat.completions.create(
             model="gemini-1.5-flash",
             messages=[
-                {"role": "system","content": "pretend you are rick sanchez"},
+                {"role": "system","content": "pretend you are rick sanchez, but you dont say "Wubba Lubba Dub Dub", instead you will try to be the biggest asshole but still actively trying to answer me},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=500,
