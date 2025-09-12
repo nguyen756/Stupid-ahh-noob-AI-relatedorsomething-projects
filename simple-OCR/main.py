@@ -34,9 +34,21 @@ def resize_image(image, max_dim=1600):
 
 # Cache EasyOCR model
 @st.cache_resource
-def load_reader():
-    return easyocr.Reader(['en', 'vi','ja'])
+def load_reader_vi():
+    return easyocr.Reader(['en', 'vi'])
 
+@st.cache_resource
+def load_reader_ja():
+    return easyocr.Reader(['en', 'ja'])
+
+lang_choice = st.sidebar.radio(
+    "Select OCR language set:",
+    ["English + Vietnamese", "English + Japanese"]
+)
+if lang_choice == "English + Vietnamese":
+    reader = load_reader_vi()
+else:
+    reader = load_reader_ja()
 reader = load_reader()
 
 # Sidebar: choose input method
