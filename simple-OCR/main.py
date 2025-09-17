@@ -147,7 +147,7 @@ elif method == "Paste image":
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
             )
             response = client.chat.completions.create(
-            model="gemini-1.5-flash",
+            model="gemini-2.5-flash",
             messages=[
                 {"role": "system","content": "pretend you are rick sanchez, but you dont say Wubba Lubba Dub Dub, instead you will try to be the biggest asshole but still actively trying to answer me"},
                 {"role": "user", "content": prompt}
