@@ -11,8 +11,8 @@
     "DOWNSCALE_MAX_WIDTH": 1200,
     "OCR_WORKERS": 4,
     "USE_TESSERACT_AUTO": true,
-    "CHUNKING_STRATEGY": "sentences",
-    "MAX_ANIMALS": 3
+    "CHUNKING_STRATEGY": "paragraph",
+    "MAX_ANIMALS": 2
   },
-  "timestamp": 1757519993.5102272
+  "timestamp": 1758294301.5238488
 }

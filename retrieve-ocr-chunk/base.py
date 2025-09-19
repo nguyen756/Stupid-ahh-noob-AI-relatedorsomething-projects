@@ -12,7 +12,9 @@ from chunking import Chunker
 from deduplication import Deduplicator
 from embedding import Embedder
 from indexing import Indexer
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
+nltk.download("punkt")
 class Base:
 
 
@@ -38,6 +40,10 @@ class Base:
         pages_path = os.path.join(out_dir, Constants.PAGES_JSONL)
         manifest_path = os.path.join(out_dir, Constants.MANIFEST_JSON)
 
+
+
+
+
         # Merge provided params with defaults for manifest tracking
         manifest_params = {
             "CHUNK_MAX_CHARS": params.get("CHUNK_MAX_CHARS", Constants.CHUNK_MAX_CHARS),
@@ -50,6 +56,11 @@ class Base:
             "CHUNKING_STRATEGY": params.get("CHUNKING_STRATEGY", "sentences"), #or "paragraph" or "sentences" or "wiki_sections"
             "MAX_ANIMALS": params.get("MAX_ANIMALS", 10)
         }
+
+
+
+
+
         new_manifest = Utils.make_manifest(pdf_paths, wiki_titles, manifest_params)
         old_manifest = Utils.load_manifest(manifest_path) if os.path.exists(manifest_path) else None
         diff = Utils.manifests_differ(old_manifest, new_manifest)
@@ -209,8 +220,8 @@ if __name__ == "__main__":
         "DOWNSCALE_MAX_WIDTH": Constants.DOWNSCALE_MAX_WIDTH,
         "OCR_WORKERS": Constants.OCR_WORKERS,
         "USE_TESSERACT_AUTO": Constants.USE_TESSERACT_AUTO,
-        "CHUNKING_STRATEGY": "sentences",  # or "sentences" | "wiki_sections" | "paragraph"
-        "MAX_ANIMALS": 3, 
+        "CHUNKING_STRATEGY": "paragraph",  # or "sentences" | "wiki_sections" | "paragraph"
+        "MAX_ANIMALS": 2, 
     }
 
     chunks, embeddings, index = Base.prepare_from_pdf_paths(

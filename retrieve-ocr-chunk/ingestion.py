@@ -17,9 +17,39 @@ from utils import Utils
 class Ingestion:
     # Static variable for EasyOCR reader (one per worker process)
     _worker_easy_reader = None
+#-------------------------
+# Select a representative image from a Wikipedia page
+#-------------------------
+    @staticmethod
+    def _select_wikipedia_image(page) -> str:
+        """Pick a representative image URL from a wikipedia.page object."""
+        images = list(getattr(page, "images", []) or [])
+        if not images:
+            return None
+
+        def is_candidate(url: str) -> bool:
+            lower = url.lower()
+            if any(ext for ext in (".jpg", ".jpeg", ".png", ".webp") if lower.endswith(ext)):
+                if "svg" in lower:
+                    return False
+                banned = ("logo", "stalder", "wikimedia", "wordmark", "icon")
+                if any(token in lower for token in banned):
+                    return False
+                return True
+            return False
+
+        for img in images:
+            if is_candidate(img):
+                return img
+
+        for img in images:
+            lower = img.lower()
+            if any(lower.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp")) and "svg" not in lower:
+                return img
+        return None
     #-------------------------
     #Return the full Wikipedia URL
-    #------------------------
+    #------------------------   
     @staticmethod
     def page_url_from_title(title: str, lang: str = "vi") -> str:
         return f"https://{lang}.wikipedia.org/wiki/{quote(title.replace(' ', '_'))}"
@@ -99,12 +129,14 @@ class Ingestion:
                     seed_page = wikipedia.page(hits[0])
                 except Exception:
                     continue
+            image_url = Ingestion._select_wikipedia_image(seed_page)
             pages.append({
                 "page": 1,
                 "text": Utils.clean_ocr_text(seed_page.content),
                 "source": "wiki",
                 "url": seed_page.url,
-                "title": seed_page.title
+                "title": seed_page.title,
+                "image_url": image_url
             })
             # Optionally fetch direct linked pages from this seed page
             if not include_links:
@@ -128,12 +160,14 @@ class Ingestion:
                         lp = wikipedia.page(hits[0])
                     except Exception:
                         continue
+                image_url = Ingestion._select_wikipedia_image(lp)
                 pages.append({
                     "page": 1,
                     "text": Utils.clean_ocr_text(lp.content),
                     "source": "wiki",
                     "url": lp.url,
-                    "title": lp.title
+                    "title": lp.title,
+                    "image_url": image_url
                 })
                 total_linked_fetched += 1
             if linked_cap is not None and total_linked_fetched >= linked_cap:

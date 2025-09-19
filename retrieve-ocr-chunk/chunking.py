@@ -55,8 +55,11 @@ class Chunker:
             "source": pinfo.get("source"),
             "page": pinfo.get("page", 1),
             "text": cur_text,
+            "image_url": pinfo.get("image_url"),
+            "url": pinfo.get("url"),
             "hash": fingerprint
-        }
+}
+
         if extra_meta:
             chunk_meta.update(extra_meta)
         chunks.append(chunk_meta)
